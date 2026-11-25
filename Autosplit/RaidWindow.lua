@@ -1,7 +1,10 @@
 local _, Autosplit = ...
 local giveaway = Autosplit.Giveaway
 local window, minimapButton
+local PositionMinimap
 local ICON = "Interface\\AddOns\\Autosplit\\Icon"
+local DEFAULT_MINIMAP_ANGLE = 220
+local WINDOW_WIDTH, AUTOSPLIT_HEIGHT, GENERAL_HEIGHT = 864, 686, 245
 
 local function Text(parent, font, x, y, width, text)
     local label = parent:CreateFontString(nil, "OVERLAY", font)
@@ -179,7 +182,7 @@ local function SelectList(mode)
 end
 
 function Autosplit.RefreshWindow(forceQuantity)
-    if not window or not window:IsShown() then return end
+    if not window or not window:IsShown() or window.section ~= "autosplit" then return end
     local db = giveaway.db
     RefreshInventory()
     RefreshLists()
@@ -203,12 +206,31 @@ function Autosplit.RefreshWindow(forceQuantity)
     window.night:SetText("Night: " .. giveaway:Night() .. "  |  Resets at 6 a.m. local")
 end
 
+local function RefreshGeneral()
+    local visible = not giveaway.db.minimapHidden
+    window.minimapVisibility:SetText(visible and "Hide minimap button" or "Show minimap button")
+    if minimapButton then minimapButton:SetShown(visible) end
+end
+
+local function SelectSection(section)
+    if window.section == section then return end
+    if window.section == "autosplit" then window.quantity:ClearFocus() end
+    window.section = section
+    local general = section == "general"
+    window:SetSize(WINDOW_WIDTH, general and GENERAL_HEIGHT or AUTOSPLIT_HEIGHT)
+    window.generalPanel:SetShown(general)
+    window.autosplitPanel:SetShown(not general)
+    window.generalTab:SetEnabled(not general)
+    window.autosplitTab:SetEnabled(general)
+    if general then RefreshGeneral() else Autosplit.RefreshWindow() end
+end
+
 local function CreateWindow()
     if window then return end
     giveaway:Initialize()
     window = CreateFrame("Frame", "AutosplitMainWindow", UIParent, "BasicFrameTemplateWithInset")
     window:Hide()
-    window:SetSize(864, 650)
+    window:SetSize(WINDOW_WIDTH, AUTOSPLIT_HEIGHT)
     window:SetPoint("CENTER")
     window:SetFrameStrata("HIGH")
     window:SetClampedToScreen(true)
@@ -217,12 +239,37 @@ local function CreateWindow()
     window:RegisterForDrag("LeftButton")
     window:SetScript("OnDragStart", window.StartMoving)
     window:SetScript("OnDragStop", window.StopMovingOrSizing)
-    window.TitleText:SetText("Autosplit  |  Bags & Raid Giveaway")
+    window.TitleText:SetText("NE Tools")
     tinsert(UISpecialFrames, "AutosplitMainWindow")
-    Text(window, "GameFontNormalLarge", 20, -42, 440, "Your bags")
-    Text(window, "GameFontHighlightSmall", 20, -68, 455, "Click an item to give it away. Ctrl-click a stack to split it.")
+    window.generalTab = Button(window, "General", 18, -30, 116, function() SelectSection("general") end)
+    window.autosplitTab = Button(window, "Autosplit", 138, -30, 116, function() SelectSection("autosplit") end)
 
-    local bagScroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
+    local general = CreateFrame("Frame", nil, window)
+    general:SetPoint("TOPLEFT", 0, -36)
+    general:SetSize(WINDOW_WIDTH, GENERAL_HEIGHT - 36)
+    window.generalPanel = general
+    Text(general, "GameFontNormalLarge", 20, -42, 450, "General")
+    Text(general, "GameFontHighlight", 20, -76, 600, "Minimap button")
+    window.minimapVisibility = Button(general, "Hide minimap button", 20, -105, 175, function()
+        giveaway.db.minimapHidden = not giveaway.db.minimapHidden
+        RefreshGeneral()
+    end)
+    window.minimapReset = Button(general, "Reset position", 205, -105, 138, function()
+        giveaway.db.minimapAngle = DEFAULT_MINIMAP_ANGLE
+        if minimapButton then PositionMinimap() end
+    end)
+    Text(general, "GameFontHighlightSmall", 20, -150, 780,
+        "Drag the NE button around the minimap to move it. Type /netools to open NE Tools, even if the button is hidden.")
+    Text(general, "GameFontDisableSmall", 20, -178, 780, "Night Eternal Tools for World of Warcraft Retail")
+
+    local panel = CreateFrame("Frame", nil, window)
+    panel:SetPoint("TOPLEFT", 0, -36)
+    panel:SetSize(WINDOW_WIDTH, AUTOSPLIT_HEIGHT - 36)
+    window.autosplitPanel = panel
+    Text(panel, "GameFontNormalLarge", 20, -42, 440, "Your bags")
+    Text(panel, "GameFontHighlightSmall", 20, -68, 455, "Click an item to give it away. Ctrl-click a stack to split it.")
+
+    local bagScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     bagScroll:SetPoint("TOPLEFT", 18, -95)
     bagScroll:SetSize(454, 490)
     window.bagContent = CreateFrame("Frame", nil, bagScroll)
@@ -230,9 +277,9 @@ local function CreateWindow()
     bagScroll:SetScrollChild(window.bagContent)
     window.bagButtons, window.bagLabels, window.rosterLabels = {}, {}, {}
 
-    Text(window, "GameFontNormalLarge", 520, -42, 320, "Raid giveaway")
-    window.state = Text(window, "GameFontHighlight", 520, -70, 320)
-    window.selection = CreateFrame("Button", nil, window)
+    Text(panel, "GameFontNormalLarge", 520, -42, 320, "Raid giveaway")
+    window.state = Text(panel, "GameFontHighlight", 520, -70, 320)
+    window.selection = CreateFrame("Button", nil, panel)
     window.selection:SetSize(54, 54)
     window.selection:SetPoint("TOPLEFT", 520, -99)
     window.selection:SetNormalTexture("Interface\\Buttons\\UI-Quickslot2")
@@ -249,11 +296,11 @@ local function CreateWindow()
         GameTooltip:Show()
     end)
     window.selection:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    window.itemName = Text(window, "GameFontNormal", 587, -101, 245)
+    window.itemName = Text(panel, "GameFontNormal", 587, -101, 245)
     window.itemName:SetHeight(22)
     window.itemName:SetWordWrap(false)
-    Text(window, "GameFontHighlightSmall", 587, -134, 70, "Quantity:")
-    window.quantity = CreateFrame("EditBox", nil, window, "InputBoxTemplate")
+    Text(panel, "GameFontHighlightSmall", 587, -134, 70, "Quantity:")
+    window.quantity = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     window.quantity:SetSize(74, 24)
     window.quantity:SetPoint("TOPLEFT", 658, -126)
     window.quantity:SetAutoFocus(false)
@@ -266,18 +313,18 @@ local function CreateWindow()
         self:ClearFocus()
         self:SetText(tostring(giveaway.db.quantity))
     end)
-    window.stock = Text(window, "GameFontHighlightSmall", 520, -167, 320)
-    window.toggle = Button(window, "Pause giveaway", 520, -194, 166, function() giveaway:ToggleEnabled() end)
-    window.clear = Button(window, "Clear item", 696, -194, 134, function() giveaway:Select(nil) end)
-    local details = Text(window, "GameFontHighlightSmall", 520, -236, 310,
+    window.stock = Text(panel, "GameFontHighlightSmall", 520, -167, 320)
+    window.toggle = Button(panel, "Pause giveaway", 520, -194, 166, function() giveaway:ToggleEnabled() end)
+    window.clear = Button(panel, "Clear item", 696, -194, 134, function() giveaway:Select(nil) end)
+    local details = Text(panel, "GameFontHighlightSmall", 520, -236, 310,
         "When a raid member opens trade, the selected quantity is added automatically. Finish with WoW's Trade button.\n\nEach person gets one giveaway tonight, even after a reload or item change.")
     details:SetHeight(92)
     details:SetJustifyV("TOP")
     window.listMode = "remaining"
-    window.remainingTab = Button(window, "Remaining players", 520, -332, 150, function() SelectList("remaining") end)
-    window.attemptsTab = Button(window, "Unconfirmed", 730, -332, 100, function() SelectList("unconfirmed") end)
-    window.rosterTitle = Text(window, "GameFontNormal", 520, -371, 310)
-    local rosterScroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
+    window.remainingTab = Button(panel, "Remaining players", 520, -332, 150, function() SelectList("remaining") end)
+    window.attemptsTab = Button(panel, "Unconfirmed", 730, -332, 100, function() SelectList("unconfirmed") end)
+    window.rosterTitle = Text(panel, "GameFontNormal", 520, -371, 310)
+    local rosterScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     rosterScroll:SetPoint("TOPLEFT", 520, -395)
     rosterScroll:SetSize(292, 108)
     window.rosterScroll = rosterScroll
@@ -285,7 +332,7 @@ local function CreateWindow()
     window.rosterContent:SetSize(290, 108)
     rosterScroll:SetScrollChild(window.rosterContent)
     window.remainingEmpty = Text(window.rosterContent, "GameFontDisableSmall", 0, -4, 290)
-    window.historyScroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
+    window.historyScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     window.historyScroll:SetPoint("TOPLEFT", 520, -395)
     window.historyScroll:SetSize(292, 108)
     window.historyContent = CreateFrame("Frame", nil, window.historyScroll)
@@ -293,11 +340,14 @@ local function CreateWindow()
     window.historyScroll:SetScrollChild(window.historyContent)
     window.historyRows = {}
     window.historyEmpty = Text(window.historyContent, "GameFontDisableSmall", 0, -4, 290, "No unconfirmed trades tonight.")
-    window.status = Text(window, "GameFontHighlightSmall", 520, -520, 310)
+    window.status = Text(panel, "GameFontHighlightSmall", 520, -520, 310)
     window.status:SetHeight(64)
     window.status:SetJustifyV("TOP")
-    window.night = Text(window, "GameFontDisableSmall", 20, -610, 805)
-    window:SetScript("OnShow", Autosplit.RefreshWindow)
+    window.night = Text(panel, "GameFontDisableSmall", 20, -610, 805)
+    SelectSection("autosplit")
+    window:SetScript("OnShow", function()
+        if window.section == "general" then RefreshGeneral() else Autosplit.RefreshWindow() end
+    end)
 end
 
 function Autosplit.ToggleWindow()
@@ -305,8 +355,8 @@ function Autosplit.ToggleWindow()
     window:SetShown(not window:IsShown())
 end
 
-local function PositionMinimap()
-    local angle = math.rad(giveaway.db.minimapAngle or 220)
+PositionMinimap = function()
+    local angle = math.rad(giveaway.db.minimapAngle or DEFAULT_MINIMAP_ANGLE)
     local radius = Minimap:GetWidth() / 2 + 8
     minimapButton:ClearAllPoints()
     minimapButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
@@ -327,8 +377,8 @@ local function CreateMinimap()
     minimapButton:SetScript("OnClick", Autosplit.ToggleWindow)
     minimapButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Autosplit", 0.35, 0.84, 1)
-        GameTooltip:AddLine("Click: bags and raid giveaway\nDrag: move around minimap\n/as: open menu", 1, 1, 1)
+        GameTooltip:AddLine("NE Tools", 0.35, 0.84, 1)
+        GameTooltip:AddLine("Click: open NE Tools\nDrag: move around minimap\n/netools: open menu", 1, 1, 1)
         GameTooltip:Show()
     end)
     minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -344,6 +394,7 @@ local function CreateMinimap()
     end)
     minimapButton:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
     PositionMinimap()
+    minimapButton:SetShown(not giveaway.db.minimapHidden)
 end
 
 local events = CreateFrame("Frame")

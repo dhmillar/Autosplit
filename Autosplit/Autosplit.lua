@@ -5,7 +5,7 @@ local reagentBag = Enum.BagIndex.ReagentBag or 5
 local engine, dialog, ticker, selected
 
 local function Message(text)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff59d5ffAutosplit:|r " .. text)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff59d5ffNE Tools:|r " .. text)
 end
 
 local function IsCarriedBag(bag)
@@ -116,7 +116,7 @@ local function CreateDialog()
     dialog:RegisterForDrag("LeftButton")
     dialog:SetScript("OnDragStart", dialog.StartMoving)
     dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
-    dialog.TitleText:SetText("Autosplit")
+    dialog.TitleText:SetText("NE Tools - Split Stack")
     tinsert(UISpecialFrames, "AutosplitQuantityDialog")
 
     local icon = dialog:CreateTexture(nil, "ARTWORK")
@@ -241,7 +241,7 @@ local function AttachButton(button)
         if bag then
             GameTooltip:SetOwner(shield, "ANCHOR_RIGHT")
             GameTooltip:SetBagItem(bag, slot)
-            GameTooltip:AddLine("Ctrl-click: Autosplit into single items", 0.35, 0.84, 1)
+            GameTooltip:AddLine("Ctrl-click: Split into single items", 0.35, 0.84, 1)
             GameTooltip:Show()
         end
     end)
@@ -307,6 +307,7 @@ end)
 
 SLASH_AUTOSPLIT1 = "/autosplit"
 SLASH_AUTOSPLIT2 = "/as"
+SLASH_AUTOSPLIT3 = "/netools"
 SlashCmdList.AUTOSPLIT = function(command)
     if command:lower():match("^%s*stop%s*$") then
         engine:Cancel()

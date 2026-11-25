@@ -1,6 +1,6 @@
-# Autosplit 1.2.3
+# NE Tools (Night Eternal Tools) 1.2.4
 
-Hold **Ctrl** and **left-click or right-click** a stack in your bags. Autosplit opens a quantity window filled with the number of items currently in that stack. Change the number if desired, then click **Split** (or press Enter).
+Hold **Ctrl** and **left-click or right-click** a stack in your bags. NE Tools opens a quantity window filled with the number of items currently in that stack. Change the number if desired, then click **Split** (or press Enter).
 
 The quantity is the number of individual items to separate, not the size of each new stack:
 
@@ -16,7 +16,7 @@ For a full split, the final item stays in the original slot. The default quantit
 
 Target: **WoW Retail 12.1.5**, interface **120105**. Supports Blizzard's combined and individual bags and Baganator's live inventory buttons. Classic and other inventory replacements are not qualified.
 
-Extract `dist/Autosplit-1.2.3.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
+Extract `dist/Autosplit-1.2.4.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
 
 ```text
 World of Warcraft/_retail_/Interface/AddOns/Autosplit/Autosplit.toc
@@ -28,21 +28,21 @@ World of Warcraft/_retail_/Interface/AddOns/Autosplit/RaidWindow.lua
 World of Warcraft/_retail_/Interface/AddOns/Autosplit/Icon.tga
 ```
 
-Start WoW and enable **Autosplit** in the AddOns list. If WoW was already running when you added the new folder, restart the game to discover the addon.
+Start WoW and enable **NE Tools** in the AddOns list. If WoW was already running when you added the new folder, restart the game to discover the addon.
 
 ## Minimap button and raid giveaway
 
-Click the circular **AS** minimap button, or type **`/as`** (also **`/autosplit`**), to open the bag and giveaway menu. Drag the minimap button to reposition it.
+Click the circular **NE** minimap button, or type **`/as`** (also **`/autosplit`**), to open the bag and giveaway menu. Drag the minimap button to reposition it. Under General, you can hide the button or reset its position. The Autosplit tab contains bag splitting, giveaway controls, Remaining players and Unconfirmed. Use /netools to reopen the menu if the button is hidden.
 
 The menu shows your backpack and equipped bags, including empty slots and stack counts. Click an item in this view, or drag an item from your bags into the giveaway selection slot. Dropping selects a template and returns the actual item to your bags. Selection enables the giveaway. Use **Pause giveaway** or **Clear item** to stop it; these controls retain recipient history. Ctrl-clicking a stack in the bag view opens the original quantity dialog.
 
 The **Quantity** field beside the selected item defaults to **1**. Change it to a positive whole number to give that many per eligible raid member. Valid edits are saved automatically and survive reloads; choosing a different item resets the quantity to 1. Invalid or blank input pauses automatic offers until corrected. Quantity cannot be changed during a trade.
 
-When a member of your **current raid** opens trade, Autosplit either prepares **exactly the number in the Quantity box** or stops. It never picks up an entire pre-existing multi-item source stack for a giveaway, even if its size matches the box. It leaves at least one item in every multi-item source. A verified singleton can be used directly. For example, with Quantity 3 and a stack of 20, it verifies the isolated three items in a free general bag slot and leaves 17. Staged amounts can span up to six trade slots; if too few items can safely be separated, nothing is offered. Check your cursor and bags if preparation stops.
+When a member of your **current raid** opens trade, NE Tools either prepares **exactly the number in the Quantity box** or stops. It never picks up an entire pre-existing multi-item source stack for a giveaway, even if its size matches the box. It leaves at least one item in every multi-item source. A verified singleton can be used directly. For example, with Quantity 3 and a stack of 20, it verifies the isolated three items in a free general bag slot and leaves 17. Staged amounts can span up to six trade slots; if too few items can safely be separated, nothing is offered. Check your cursor and bags if preparation stops.
 
 It never initiates trades, gives money, offers more than the requested quantity, or adds items to a trade that already contains outgoing items or gold. Other players do not need the addon. Every outgoing trade slot must acknowledge its exact count before the next source is touched. Missing acknowledgement times out without a retry; an incorrect outgoing quantity cancels that same trade. If preparation is interrupted, check the trade, cursor, and any isolated stack before continuing. Foreign cursors are never cleared automatically.
 
-**Finish the trade using Blizzard's Trade button and any confirmation Blizzard displays.** Current Retail uses a restricted trade acceptance API and secure confirmation UI; Autosplit automates item placement and recipient tracking, and does not call or bypass the protected acceptance step. See the [secure transfer API](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/SecureTransferDocumentation.lua) and [Blizzard confirmation UI](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SecureTransferUI/Blizzard_SecureTransferUI.lua).
+**Finish the trade using Blizzard's Trade button and any confirmation Blizzard displays.** Current Retail uses a restricted trade acceptance API and secure confirmation UI; NE Tools automates item placement and recipient tracking, and does not call or bypass the protected acceptance step. See the [secure transfer API](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/SecureTransferDocumentation.lua) and [Blizzard confirmation UI](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SecureTransferUI/Blizzard_SecureTransferUI.lua).
 
 Each recipient's character GUID is tracked **once per local raid night**, shared across all giveaway item selections, quantities, and raid roster changes for your distributing character. A night resets at **6 a.m. local computer time**, so crossing midnight does not permit repeats. Joining another raid the same night also preserves the no-repeat record. The selected item, quantity, enabled state, minimap position, and recipient ledger are retained through normal reloads and relogs through `AutosplitCharDB` (per character), at WoW's normal save boundaries. This is not crash-proof disk persistence. Seven recent nights are retained.
 
@@ -67,9 +67,9 @@ There are no external runtime dependencies or continuously running update loops.
 
 ## Validation
 
-156 deterministic scenarios pass under Lua 5.1: 28 original splitting tests, 49 adapted raid-engine tests, 48 original/adapted UI tests, and 31 asynchronous giveaway regressions. The new regressions cover delayed/missing split and trade acknowledgements, incorrect amounts, full bags, staging locks and races, metadata/GUID changes, cancellation after acceptance, event ordering, simultaneous same-item inventory, actual-quantity discrepancies, identity/night persistence, duplicate events and interrupted reloads. The old 120-test result belongs to release 1.2.0; the current tests were actually executed for this release using a direct windowless Pythonw runner.
+The Lua 5.1 regression suites cover bag splitting, the raid engine, UI behavior, and asynchronous giveaway events. The new regressions cover delayed/missing split and trade acknowledgements, incorrect amounts, full bags, staging locks and races, metadata/GUID changes, cancellation after acceptance, event ordering, simultaneous same-item inventory, actual-quantity discrepancies, identity/night persistence, duplicate events and interrupted reloads.
 
-These are simulated tests; actual WoW interaction and taint behavior still need an in-game check. Suggested check: try 2 of 20, then a full split; repeat with both mouse buttons and confirm ordinary clicks. For any owner-performed giveaway check, first leave a free general-bag slot, select a cheap tradable stack of 20 and verify Quantity 1 offers one and leaves 19. Cancel and retry with Quantity 3 to verify three are offered and 17 remain. Complete a trade, verify its quantity in the history, and reopen trade to check no repeat is added. Also check a cancelled trade becomes eligible again after settlement.
+These are simulated tests; actual WoW interaction and taint behavior still need an in-game check. Suggested check: try 2 of 20, then a full split; repeat with both mouse buttons and confirm ordinary clicks. For any owner-performed giveaway check, first leave a free general-bag slot, select a cheap tradable stack of 20 and verify Quantity 1 offers one and leaves 19. Cancel and retry with Quantity 3 to verify three are offered and 17 remain. Complete a trade, verify the recipient disappears from Remaining players and is not listed as Unconfirmed, and reopen trade to check no repeat is added. Also check a cancelled trade becomes eligible again after settlement.
 
 For developers, run `tests/run_tests.py` with Python and the `lupa` package (its Lua 5.1 runtime), or execute each `tests/*_spec.lua` from the addon root using Lua 5.1. `python build.py` recreates the installable ZIP.
 

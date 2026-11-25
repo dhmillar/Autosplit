@@ -1,8 +1,8 @@
-# Autosplit for WoW Retail
+# NE Tools for WoW Retail
 
-<img src="assets/autosplit-icon.png" alt="Autosplit icon" width="96">
+<img src="assets/ne-tools-icon.png" alt="NE Tools moon icon" width="96">
 
-Autosplit breaks a stack into individual items with Ctrl-click and helps hand out a chosen quantity to each eligible raid member once per raid night. You still review and accept each trade through Blizzard's UI.
+NE Tools (Night Eternal Tools, formerly Autosplit) breaks a stack into individual items with Ctrl-click and helps hand out a chosen quantity to each eligible raid member once per raid night. You still review and accept each trade through Blizzard's UI.
 
 ## Install
 
@@ -11,7 +11,7 @@ Autosplit breaks a stack into individual items with Ctrl-click and helps hand ou
 
 For WoW Retail 12.1.5 (interface 120105). Supports Blizzard's bags and optional Baganator integration, not Classic or Forever. Existing character settings stay in place.
 
-Open the addon with /as or the minimap button. See the [user guide](Autosplit/README.md) for controls, safety checks and trade limitations.
+Open with /netools, /as, or the NE minimap button. The General tab controls the minimap button; bags and raid giveaway are under Autosplit. Existing installs keep their settings and trade history. See the [user guide](Autosplit/README.md) for controls, safety checks and trade limitations.
 
 ## Build and test
 
