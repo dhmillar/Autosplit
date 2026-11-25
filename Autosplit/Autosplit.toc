@@ -1,0 +1,14 @@
+## Interface: 120105
+## Title: Autosplit
+## Notes: Split stacks into singles and distribute a chosen quantity once per raid member each night.
+## Author: Dennis
+## Version: 1.2.1
+## OptionalDeps: Baganator
+## SavedVariablesPerCharacter: AutosplitCharDB
+## IconTexture: Interface\AddOns\Autosplit\Icon
+
+Engine.lua
+Autosplit.lua
+RaidEngine.lua
+RaidGiveaway.lua
+RaidWindow.lua

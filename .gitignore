@@ -1,0 +1,4 @@
+/dist/
+*.bak
+*.zip
+__pycache__/

@@ -1,0 +1,300 @@
+local addon = {}
+assert(loadfile("RaidEngine.lua"))("Autosplit", addon)
+local tests = 0
+local function eq(a, b) assert(a == b, tostring(a) .. " ~= " .. tostring(b)) end
+local function test(name, fn) fn(); tests = tests + 1; print("PASS " .. name) end
+local function world(db)
+    local w = {night = "2026-10-26", total = 20, now = 0, valid = true, empty = true, member = true,
+        placements = 0, messages = {}, partner = {guid = "Player-1-ABC", name = "Raider-Realm"}}
+    w.db = db or {enabled = true, item = {itemID = 42, link = "item:42"}}
+    w.api = {
+        night = function() return w.night end,
+        timestamp = function() return 123 end,
+        time = function() return w.now end,
+        combat = function() return w.combat end,
+        member = function(guid) return w.member and guid == w.partner.guid end,
+        find = function() if w.total > 0 then return {bag = 0, slot = 1} end end,
+        count = function() return w.total end,
+        cursor = function() return w.cursor end,
+        splitBusy = function() return w.splitBusy end,
+        emptyOffer = function() return w.empty end,
+        validOffer = function(_, quantity) return w.valid and (not w.offeredQuantity or w.offeredQuantity == quantity) end,
+        session = function() return w.serial or 1 end,
+        cancelPlacement = function() end,
+        snapshot = function(item)
+            if w.empty or not w.valid then return end
+            return {itemID = item.itemID, link = item.link, quantity = w.offeredQuantity or w.placedQuantity or 1}
+        end,
+        place = function(_, _, quantity, done)
+            w.placements = w.placements + 1
+            w.placedQuantity = quantity
+            if w.failPlace then return nil, "Placement refused" end
+            w.empty = false
+            done(true)
+            return true
+        end,
+    }
+    w.engine = addon.CreateRaidEngine(w.api, w.db, function(message) w.messages[#w.messages + 1] = message end)
+    function w:begin() return self.engine:Begin(self.partner) end
+    function w:complete()
+        local quantity = self.engine.active.quantity
+        self.engine:OfferChanged()
+        self.engine:AcceptUpdate(1, 1)
+        self.engine:Close()
+        self.engine:CompleteMessage()
+        self.total = self.total - quantity
+        self.engine:Poll()
+    end
+    return w
+end
+
+test("eligible raid member receives exactly one staged item", function()
+    local w = world(); assert(w:begin()); eq(w.placements, 1)
+    eq(w.engine:Recipient(w.partner.guid).state, "pending")
+end)
+test("completed trade records recipient and blocks another giveaway", function()
+    local w = world(); assert(w:begin()); w:complete()
+    eq(w.engine:Recipient(w.partner.guid).state, "served")
+    eq(w:begin(), nil); eq(w.placements, 1)
+end)
+test("cancelled trade restores eligibility after inventory settles", function()
+    local w = world(); assert(w:begin()); w.engine:Cancelled(); w.engine:Close(); w.engine:Poll()
+    assert(w.engine.active)
+    w.now = 6; w.engine:Poll(); eq(w.engine:Recipient(w.partner.guid), nil)
+    w.empty = true; assert(w:begin()); eq(w.placements, 2)
+end)
+test("closed trade with no evidence cannot be counted as success", function()
+    local w = world(); assert(w:begin()); w.engine:Close(); w.total = 19
+    w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+    eq(w:begin(), nil)
+end)
+test("unaccepted closure without cancellation evidence remains unconfirmed", function()
+    local w = world(); assert(w:begin()); w.engine:Close(); w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("server completion plus accepted snapshot confirms delivery", function()
+    local w = world(); assert(w:begin()); w.engine:AcceptUpdate(1,0); w.engine:CompleteMessage()
+    w.engine:Close(); w.total = 19; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "served")
+end)
+test("success message without the configured offer never marks delivery", function()
+    local w = world(); assert(w:begin()); w.engine:CompleteMessage()
+    w.engine:Close(); w.total = 19; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("raid outsiders are refused", function()
+    local w = world(); w.member = false; eq(w:begin(), nil); eq(w.placements, 0)
+end)
+test("missing recipient identity is refused", function()
+    local w = world(); eq(w.engine:Begin(nil), nil); eq(w.placements, 0)
+end)
+test("paused mode never offers an item", function()
+    local w = world(); w.db.enabled = false; eq(w:begin(), nil); eq(w.placements, 0)
+end)
+test("no configured item never offers an item", function()
+    local w = world(); w.db.item = nil; eq(w:begin(), nil); eq(w.placements, 0)
+end)
+test("out of stock refuses without reservation", function()
+    local w = world(); w.total = 0; eq(w:begin(), nil); eq(w.placements, 0)
+    eq(w.engine:Recipient(w.partner.guid), nil)
+end)
+test("combat and occupied cursor and split queue block placement", function()
+    for _, field in ipairs({"combat", "cursor", "splitBusy"}) do
+        local w = world(); w[field] = true
+        eq(w:begin(), nil); eq(w.placements, 0); eq(w.engine:Recipient(w.partner.guid), nil)
+    end
+end)
+test("preexisting outgoing items or gold block automation", function()
+    local w = world(); w.empty = false; eq(w:begin(), nil); eq(w.placements, 0)
+end)
+test("opening another trade while active never adds a second item", function()
+    local w = world(); assert(w:begin()); eq(w:begin(), nil); eq(w.placements, 1)
+end)
+test("saved ledger survives a new engine instance", function()
+    local w = world(); assert(w:begin()); w:complete()
+    local reloaded = world(w.db)
+    eq(reloaded:begin(), nil); eq(reloaded.placements, 0)
+end)
+test("reload during an offered trade blocks repeat delivery", function()
+    local w = world(); assert(w:begin())
+    local reloaded = world(w.db)
+    eq(reloaded:begin(), nil); eq(reloaded.placements, 0)
+end)
+test("changing item does not reset the recipient ledger", function()
+    local w = world(); assert(w:begin()); w:complete()
+    assert(w.engine:Select({itemID = 99, link = "item:99"}))
+    eq(w:begin(), nil); eq(w.placements, 1)
+end)
+test("item selection cannot change during an active trade", function()
+    local w = world(); assert(w:begin())
+    eq(w.engine:Select({itemID = 99}), nil); eq(w.db.item.itemID, 42)
+end)
+test("next raid night gets a new ledger", function()
+    local w = world(); assert(w:begin()); w:complete()
+    w.night = "2026-10-27"; w.empty = true
+    assert(w:begin()); eq(w.placements, 2)
+end)
+test("night rollover mid-trade commits to the original night", function()
+    local w = world(); assert(w:begin()); w.night = "2026-10-27"; w:complete()
+    eq(w.db.nights["2026-10-26"][w.partner.guid].state, "served")
+    eq(w.engine:Recipient(w.partner.guid), nil)
+end)
+test("duplicate trade-closed events cannot extend settlement indefinitely", function()
+    local w = world(); assert(w:begin()); w.engine:Close(); w.now = 4; w.engine:Close()
+    w.now = 6; w.engine:Poll(); eq(w.engine.active, nil)
+end)
+test("completion waits for server confirmation instead of an inventory decrease", function()
+    local w = world(); assert(w:begin()); w.engine:OfferChanged(); w.engine:AcceptUpdate(1,1)
+    w.engine:Close(); w.engine:Poll(); assert(w.engine.active)
+    w.now = 2; w.total = 19; w.engine:Poll(); assert(w.engine.active)
+    w.engine:CompleteMessage()
+    eq(w.engine:Recipient(w.partner.guid).state, "served")
+end)
+test("both-accepted teardown resets do not erase completion evidence", function()
+    local w = world(); assert(w:begin()); w.engine:AcceptUpdate(1,1)
+    w.valid = false; w.empty = true
+    w.engine:AcceptUpdate(0,0); w.engine:OfferChanged(); w.engine:Close(); w.engine:CompleteMessage()
+    w.total = 19; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "served")
+end)
+test("extra outgoing items invalidate previous acceptance evidence", function()
+    local w = world(); assert(w:begin()); w.engine:AcceptUpdate(1,1)
+    w.valid = false; w.empty = false; w.engine:OfferChanged(); w.engine:Close()
+    w.total = 19; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("placement failure retains reservation until trade cancellation settles", function()
+    local w = world(); w.failPlace = true; eq(w:begin(), nil)
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+    w.engine:Close(); w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid), nil)
+end)
+test("more than one item lost is not recorded as an exact one-item gift", function()
+    local w = world(); assert(w:begin()); w.engine:AcceptUpdate(1,1); w.engine:Close()
+    w.total = 18; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("clearing and reselecting never erases tonight's history", function()
+    local w = world(); assert(w:begin()); w:complete()
+    assert(w.engine:Select(nil)); eq(w.db.enabled, false)
+    assert(w.engine:Select({itemID = 42})); eq(w.db.enabled, true)
+    eq(w:begin(), nil)
+end)
+test("trade history excludes pending and uncertain recipients", function()
+    local w = world(); assert(w:begin()); eq(#w.engine:History(), 0)
+    w.engine:Close(); w.total = 19; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+    eq(#w.engine:History(), 0)
+end)
+test("trade history exposes recipient item and completion time after reload", function()
+    local w = world(); assert(w:begin()); w:complete()
+    local reloaded = world(w.db)
+    local history = reloaded.engine:History()
+    eq(#history, 1); eq(history[1].name, "Raider-Realm")
+    eq(history[1].guid, w.partner.guid); eq(history[1].itemID, 42)
+    eq(history[1].link, "item:42"); eq(history[1].timestamp, 123)
+end)
+test("history remains after raid departure and item selection change", function()
+    local w = world(); assert(w:begin()); w:complete(); w.member = false
+    assert(w.engine:Select({itemID = 99}))
+    eq(#w.engine:History(), 1); eq(w.engine:History()[1].itemID, 42)
+end)
+test("history sorts newest first without changing saved ledger entries", function()
+    local w = world()
+    local ledger = w.engine:Ledger()
+    ledger.A = {state = "served", name = "Alpha-Realm", timestamp = 20, itemID = 42}
+    ledger.B = {state = "served", name = "Bravo-Realm", timestamp = 30, itemID = 42}
+    ledger.C = {state = "served", name = "Charlie-Realm", timestamp = 20, itemID = 42}
+    local history = w.engine:History()
+    eq(history[1].guid, "B"); eq(history[2].guid, "A"); eq(history[3].guid, "C")
+    history[1].name = "Changed"
+    eq(ledger.B.name, "Bravo-Realm")
+end)
+test("history switches to the new night without deleting previous history", function()
+    local w = world(); assert(w:begin()); w:complete(); w.night = "2026-10-27"
+    eq(#w.engine:History(), 0)
+    eq(w.db.nights["2026-10-26"][w.partner.guid].state, "served")
+end)
+test("giveaway quantity defaults to one for existing saved settings", function()
+    local w = world(); eq(w.db.quantity, 1); assert(w:begin()); eq(w.placedQuantity, 1)
+end)
+test("valid quantity persists through a fresh engine", function()
+    local w = world(); assert(w.engine:SetQuantity("5"))
+    eq(w.db.quantity, 5); eq(world(w.db).db.quantity, 5)
+end)
+test("invalid quantity edits block automation instead of using the last value", function()
+    for _, quantity in ipairs({"", "0", "-1", "1.5", "2e1", "abc", "10000000", 0/0, math.huge}) do
+        local w = world(); eq(w.engine:SetQuantity(quantity), nil)
+        eq(w:begin(), nil); eq(w.placements, 0); eq(w.db.quantity, 1)
+        assert(w.engine:SetQuantity("2")); assert(w:begin()); eq(w.placedQuantity, 2)
+    end
+end)
+test("corrupt saved quantities migrate to one", function()
+    for _, quantity in ipairs({0, -1, 1.5, "5", math.huge}) do
+        local w = world({quantity = quantity}); eq(w.db.quantity, 1)
+    end
+end)
+test("requested amount is frozen in the pending trade and completed history", function()
+    local w = world(); assert(w.engine:SetQuantity(5)); assert(w:begin())
+    eq(w.engine.active.quantity, 5); eq(w.placedQuantity, 5)
+    w:complete(); eq(w.engine:History()[1].quantity, 5)
+end)
+test("quantity edits are refused while a trade is active", function()
+    local w = world(); assert(w.engine:SetQuantity(5)); assert(w:begin())
+    eq(w.engine:SetQuantity(2), nil); eq(w.db.quantity, 5); eq(w.engine.active.quantity, 5)
+end)
+test("insufficient total stock never reserves a recipient", function()
+    local w = world(); assert(w.engine:SetQuantity(21)); eq(w:begin(), nil)
+    eq(w.placements, 0); eq(w.engine:Recipient(w.partner.guid), nil)
+end)
+test("wrong outgoing amount cannot mark a requested gift as delivered", function()
+    local w = world(); assert(w.engine:SetQuantity(5)); assert(w:begin())
+    w.offeredQuantity = 1; w.engine:AcceptUpdate(1,1); w.engine:Close()
+    w.total = 15; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("partial inventory decrease is not a completed quantity giveaway", function()
+    local w = world(); assert(w.engine:SetQuantity(5)); assert(w:begin())
+    w.engine:AcceptUpdate(1,1); w.engine:Close(); w.total = 19; w.now = 6; w.engine:Poll()
+    eq(w.engine:Recipient(w.partner.guid).state, "uncertain")
+end)
+test("cancelled multiple-item giveaway can be retried", function()
+    local w = world(); assert(w.engine:SetQuantity(5)); assert(w:begin())
+    w.engine:Cancelled(); w.engine:Close(); w.now = 6; w.engine:Poll(); eq(w.engine:Recipient(w.partner.guid), nil)
+    w.empty = true; assert(w:begin()); eq(w.placedQuantity, 5)
+end)
+test("changing quantity does not erase nightly duplicate prevention", function()
+    local w = world(); assert(w:begin()); w:complete()
+    assert(w.engine:SetQuantity(5)); eq(w:begin(), nil)
+end)
+test("new item resets quantity to one but same-item reselection preserves it", function()
+    local w = world(); assert(w.engine:SetQuantity(5))
+    assert(w.engine:Select({itemID = 42, link = "item:42"})); eq(w.db.quantity, 5)
+    assert(w.engine:Select({itemID = 99, link = "item:99"})); eq(w.db.quantity, 1)
+end)
+test("old history without quantity still displays one", function()
+    local w = world(); local ledger = w.engine:Ledger()
+    ledger.old = {state = "served", name = "Old-Realm", itemID = 42, timestamp = 1}
+    eq(w.engine:History()[1].quantity, 1)
+end)
+test("a late placement callback cannot revive a closed trade", function()
+    local w = world()
+    w.api.place = function(_, _, _, done) w.late = done; return true end
+    assert(w:begin()); eq(w.engine.active.phase, "placing")
+    w.engine:Close(); w.late(true); w.late(nil, "late failure")
+    eq(w.engine.active.phase, "closing"); eq(#w.engine:History(), 0)
+end)
+test("repeated placement callbacks cannot downgrade an acknowledged offer", function()
+    local w = world()
+    w.api.place = function(_, _, quantity, done)
+        w.placedQuantity = quantity; w.empty = false; w.late = done; return true
+    end
+    assert(w:begin()); w.late(true); w.late(nil, "duplicate callback")
+    eq(w.engine.active.phase, "offered"); eq(w.engine:Recipient(w.partner.guid).state, "pending")
+end)
+test("an unresolved recipient name never reserves or starts a giveaway", function()
+    local w = world(); w.partner.name = "Unknown"
+    eq(w:begin(), nil); eq(w.placements, 0); eq(w.engine:Recipient(w.partner.guid), nil)
+end)
+print(("Raid engine: %d tests passed"):format(tests))
