@@ -65,6 +65,7 @@ local function world(stacks, quantity, options)
         return unit == "raid2" and "Player-Raider" or "Player-Self"
     end
     GetUnitName = function(unit)
+        if unit == "NPC" and options.missingNpcName then return nil end
         if unit == "NPC" and not w.npc then return end
         return (unit == "NPC" or unit == "raid2") and "Raider-Realm" or "Self-Realm"
     end
@@ -105,6 +106,10 @@ local function world(stacks, quantity, options)
                 end)
             else
                 assert(w.inventory[slot])
+                if options.delayedPickup then
+                    later(function() w.held, w.inventory[slot] = w.inventory[slot], nil end)
+                    return
+                end
                 w.held, w.inventory[slot] = w.inventory[slot], nil
             end
         end,
@@ -184,9 +189,23 @@ test("an exact existing single needs no empty general slot", function()
     eq(w.splitCalls, 0); eq(w.outgoing[1].stackCount, 1)
 end)
 test("multi-stack quantity waits for each trade slot and offers exactly five", function()
-    local w = world({3, 3}, 5); w:openTrade(); w:advance(2)
+    local w = world({4, 3}, 5); w:openTrade(); w:advance(2)
     eq(w.outgoing[1].stackCount, 3); eq(w.outgoing[2].stackCount, 2)
-    eq(w.inventory[2].stackCount, 1); eq(w.clickCalls, 2)
+    eq(w.inventory[1].stackCount, 1); eq(w.inventory[2].stackCount, 1); eq(w.clickCalls, 2)
+end)
+test("never picks up an exact-size pre-existing multi-item stack", function()
+    local w = world({5}, 5); w:openTrade(); w:advance(2)
+    eq(w.pickupCalls, 0); eq(w.clickCalls, 0); eq(w.inventory[1].stackCount, 5)
+end)
+test("an asynchronous pickup cannot submit an unverified cursor stack", function()
+    local w = world({20}, 1, {delayedPickup=true}); w:openTrade(); w:advance(2)
+    eq(w.clickCalls, 0); eq(w.outgoing[1], nil)
+end)
+test("successful trade gets the name from the matching raid GUID if the trade unit name is unavailable", function()
+    local w = world({20}, 1, {missingNpcName=true}); w:openTrade(); w:advance(1)
+    w:accept(true, true); CloseTrade()
+    w:fire("UI_ERROR_MESSAGE", LE_GAME_ERR_TRADE_COMPLETE, ERR_TRADE_COMPLETE); w:advance(1)
+    eq(w.controller.engine:History()[1].name, "Raider-Realm")
 end)
 test("changing partner during a delayed split stops every later trade click", function()
     local w = world({20}); w:openTrade(); w:advance(0.08)
@@ -240,9 +259,9 @@ test("a new trade session cannot supply completion evidence for the prior recipi
 end)
 
 test("missing outgoing acknowledgement never retries placement or touches the next source", function()
-    local w = world({3,3}, 5, {noTradeAck = true}); w:openTrade(); w:advance(6)
-    eq(w.clickCalls, 1); eq(w.splitCalls, 0); eq(w.inventory[2].stackCount, 3)
-    eq(#w.controller.engine:History(), 0)
+    local w = world({4,3}, 5, {noTradeAck = true}); w:openTrade(); w:advance(6)
+    eq(w.clickCalls, 1); eq(w.splitCalls, 1); eq(w.inventory[2].stackCount, 3)
+    eq(w.open, false); eq(#w.controller.engine:History(), 0)
 end)
 test("incorrect split amount is never picked up for a trade", function()
     local w = world({20}, 1, {splitAmount = 2}); w:openTrade(); w:advance(6)
@@ -304,6 +323,7 @@ test("failure after acceptance plus inventory loss remains unconfirmed", functio
 end)
 test("success without an accepted item snapshot is visible only as unconfirmed", function()
     local w = world({20}); w:openTrade(); w:advance(1)
+    w.inventory[1].stackCount = 20 -- no independent evidence that a gift left the bags
     w:fire("UI_INFO_MESSAGE", LE_GAME_ERR_TRADE_COMPLETE, ERR_TRADE_COMPLETE)
     CloseTrade(); w:advance(6)
     eq(#w.controller.engine:History(), 0); eq(#w.controller.engine:Attempts(), 1)

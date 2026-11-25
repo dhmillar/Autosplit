@@ -3,6 +3,15 @@ local maxBag = (NUM_BAG_SLOTS or 4) + (NUM_REAGENTBAG_SLOTS or 1)
 local controller = {status = "Choose an item from your bags to start a raid giveaway."}
 Autosplit.Giveaway = controller
 
+local function ReadableText(value)
+    if issecretvalue and issecretvalue(value) then return nil end
+    if type(value) == "string" and value ~= "" then return value end
+end
+
+local function ReadableGUID(unit)
+    return ReadableText(UnitGUID(unit))
+end
+
 local function Matches(info, item)
     return info and info.itemID == item.itemID and (not item.link or info.hyperlink == item.link)
 end
@@ -39,9 +48,9 @@ function controller:Roster()
     if not IsInRaid() then return roster end
     for index = 1, GetNumGroupMembers() do
         local unit = "raid" .. index
-        local guid = UnitGUID(unit)
+        local guid = ReadableGUID(unit)
         if guid and not UnitIsUnit(unit, "player") then
-            roster[#roster + 1] = {guid = guid, name = GetUnitName(unit, true) or "Unknown"}
+            roster[#roster + 1] = {guid = guid, name = ReadableText(GetUnitName(unit, true)) or "Unknown"}
         end
     end
     table.sort(roster, function(a, b) return a.name < b.name end)
@@ -49,9 +58,9 @@ function controller:Roster()
 end
 
 function controller:IsMember(guid)
-    if not guid or not IsInRaid() or guid == UnitGUID("player") then return false end
+    if not guid or not IsInRaid() or guid == ReadableGUID("player") then return false end
     for index = 1, GetNumGroupMembers() do
-        if UnitGUID("raid" .. index) == guid then return true end
+        if ReadableGUID("raid" .. index) == guid then return true end
     end
     return false
 end
@@ -107,22 +116,26 @@ local function FindItem(item, quantity)
             end
         end
     end
-    -- Exact-size stacks first, then the largest stacks to minimize trade slots.
+    -- A multi-item source must retain at least one item. The only direct
+    -- pickup allowed is a verified singleton; never dump a bag stack.
     table.sort(candidates, function(a, b)
-        if (a.count == quantity) ~= (b.count == quantity) then return a.count == quantity end
-        if a.count ~= b.count then return a.count > b.count end
+        local ac, bc = math.max(1, a.count - 1), math.max(1, b.count - 1)
+        if (a.count == 1 and quantity == 1) ~= (b.count == 1 and quantity == 1) then
+            return a.count == 1
+        end
+        if ac ~= bc then return ac > bc end
         if a.bag ~= b.bag then return a.bag < b.bag end
         return a.slot < b.slot
     end)
     local plan, remaining = {}, quantity
     for _, source in ipairs(candidates) do
-        source.amount = math.min(source.count, remaining)
+        source.amount = math.min(math.max(1, source.count - 1), remaining)
         plan[#plan + 1] = source
         remaining = remaining - source.amount
         if remaining == 0 then break end
     end
     if remaining > 0 then
-        return nil, ("Need %d unlocked, tradable items; only %d available."):format(quantity, quantity - remaining)
+        return nil, ("Need %d safely separable items; only %d available without moving a full bag stack."):format(quantity, quantity - remaining)
     end
     if #plan > 6 then return nil, "That quantity needs more than 6 trade slots. Combine stacks in your bags first." end
     return plan
@@ -172,12 +185,14 @@ end
 local function PlaceItems(plan, partner, quantity, done)
     if placementJob then return nil, "A giveaway placement is already running." end
     if not TradeFrame or not TradeFrame:IsShown() or not EmptyOffer() or GetCursorInfo()
-        or UnitGUID("NPC") ~= partner.guid or not controller:IsMember(partner.guid) then
+        or ReadableGUID("NPC") ~= partner.guid or not controller:IsMember(partner.guid) then
         return nil, "Trade or cursor changed; no giveaway item was added."
     end
     local planned, needsSlot = 0, false
     for _, source in ipairs(plan) do
-        if not source.guid or not SourceUnchanged(source) then
+        if not source.guid or type(source.amount) ~= "number" or source.amount < 1
+            or source.amount % 1 ~= 0 or source.amount > source.count
+            or (source.count > 1 and source.amount >= source.count) or not SourceUnchanged(source) then
             return nil, "Inventory changed. Reopen the trade to try again."
         end
         planned = planned + source.amount
@@ -199,6 +214,17 @@ local function PlaceItems(plan, partner, quantity, done)
         CancelPlacement()
         done(ok, message)
     end
+    local function fail(message)
+        if job.clicked and TradeFrame:IsShown() and controller.tradeSerial == job.serial
+            and ReadableGUID("NPC") == partner.guid then
+            -- Do not leave a partial or unverified automated offer ready to accept.
+            finish(nil, message .. " The giveaway trade was cancelled.")
+            if TradeFrame:IsShown() and controller.tradeSerial == job.serial
+                and ReadableGUID("NPC") == partner.guid then CloseTrade() end
+        else
+            finish(nil, message)
+        end
+    end
     local function transition(phase)
         job.phase, job.deadline = phase, GetTime() + 5
     end
@@ -212,39 +238,63 @@ local function PlaceItems(plan, partner, quantity, done)
         local kind, itemID, link = GetCursorInfo()
         return kind == "item" and itemID == item.itemID and link == item.link
     end
+    local function pickupAndOffer(pick, amount)
+        if pick.count ~= amount or not SourceUnchanged(pick) or GetCursorInfo() or not prefix()
+            or GetTradePlayerItemInfo(job.index) then
+            fail("The verified giveaway amount or trade changed. No pickup was made.")
+            return
+        end
+        -- Pick up and offer in the same Lua invocation. Do not trust a same-
+        -- item cursor arriving on a later tick: this API does not report count.
+        C_Container.PickupContainerItem(pick.bag, pick.slot)
+        if not cursorMatches() or C_Container.GetContainerItemInfo(pick.bag, pick.slot)
+            or InCombatLockdown() or not TradeFrame:IsShown()
+            or controller.tradeSerial ~= job.serial or ReadableGUID("NPC") ~= partner.guid
+            or not controller:IsMember(partner.guid) or not prefix() or GetTradePlayerItemInfo(job.index) then
+            fail("Could not verify the picked-up stack and active offer. Check your cursor and bags.")
+            return
+        end
+        transition("trade_ack")
+        job.clicked = true
+        ClickTradeButton(job.index)
+        if placementJob == job and not GetCursorInfo() and GetTradePlayerItemInfo(job.index) then
+            local offer = SnapshotOffer(item)
+            if not offer or offer.quantity ~= job.placed + amount then
+                fail("Unexpected outgoing trade quantity.")
+            end
+        end
+    end
     local function step()
         if placementJob ~= job then return end
         if InCombatLockdown() or not TradeFrame:IsShown()
-            or controller.tradeSerial ~= job.serial or UnitGUID("NPC") ~= partner.guid
+            or controller.tradeSerial ~= job.serial or ReadableGUID("NPC") ~= partner.guid
             or not controller:IsMember(partner.guid) then
-            finish(nil, "Giveaway stopped because the trade changed. Check your cursor and bags.")
+            fail("Giveaway stopped because the trade changed. Check your cursor and bags.")
             return
         end
         if GetTime() >= job.deadline then
-            finish(nil, "Giveaway acknowledgement timed out. No retry was made; check your cursor and bags.")
+            fail("Giveaway acknowledgement timed out. No retry was made; check your cursor and bags.")
             return
         end
         local source = plan[job.index]
         if job.phase == "prepare" then
             if GetCursorInfo() or not prefix() or not SourceUnchanged(source)
                 or GetTradePlayerItemInfo(job.index) then
-                finish(nil, "Trade or inventory changed; giveaway preparation stopped.")
+                fail("Trade or inventory changed; giveaway preparation stopped.")
                 return
             end
             if source.amount < source.count then
                 job.staging = StagingSlot()
-                if not job.staging then finish(nil, "Free one general bag slot and reopen trade."); return end
+                if not job.staging then fail("Free one general bag slot and reopen trade."); return end
                 transition("split_cursor")
                 C_Container.SplitContainerItem(source.bag, source.slot, source.amount)
             else
-                job.pick = source
-                transition("pickup_cursor")
-                C_Container.PickupContainerItem(source.bag, source.slot)
+                pickupAndOffer(source, source.amount)
             end
         elseif job.phase == "split_cursor" then
             if not GetCursorInfo() then return end
             if not cursorMatches() or C_Container.GetContainerItemInfo(job.staging.bag, job.staging.slot) then
-                finish(nil, "Split cursor or destination changed. Place the cursor item safely yourself.")
+                fail("Split cursor or destination changed. Place the cursor item safely yourself.")
                 return
             end
             transition("split_ack")
@@ -256,7 +306,7 @@ local function PlaceItems(plan, partner, quantity, done)
             if not original or not isolated then return end
             if not Matches(originalInfo, item) or not Matches(isolatedInfo, item)
                 or isolated.count > source.amount or originalInfo.isBound or isolatedInfo.isBound then
-                finish(nil, "Split produced an unexpected stack. Nothing from it was added to trade.")
+                fail("Split produced an unexpected stack. Nothing from it was added to trade.")
                 return
             end
             if original.guid ~= source.guid or original.count ~= source.count - source.amount
@@ -267,21 +317,7 @@ local function PlaceItems(plan, partner, quantity, done)
             job.pick = isolated
             transition("isolated_ready")
         elseif job.phase == "isolated_ready" then
-            if GetCursorInfo() or not prefix() or not SourceUnchanged(job.pick)
-                or job.pick.count ~= source.amount or GetTradePlayerItemInfo(job.index) then
-                finish(nil, "The verified giveaway stack changed; no pickup was made.")
-                return
-            end
-            transition("pickup_cursor")
-            C_Container.PickupContainerItem(job.pick.bag, job.pick.slot)
-        elseif job.phase == "pickup_cursor" then
-            if not GetCursorInfo() then return end
-            if not cursorMatches() or not prefix() or GetTradePlayerItemInfo(job.index) then
-                finish(nil, "Cursor or outgoing offer changed. Return the cursor item to your bags.")
-                return
-            end
-            transition("trade_ack")
-            ClickTradeButton(job.index)
+            pickupAndOffer(job.pick, source.amount)
         elseif job.phase == "trade_ack" then
             if GetCursorInfo() then return end
             local snapshot = SnapshotOffer(item)
@@ -292,8 +328,7 @@ local function PlaceItems(plan, partner, quantity, done)
             if not snapshot or snapshot.quantity ~= expected or count ~= source.amount then
                 -- Closing returns the offer instead of leaving an oversized
                 -- stack ready for the user to accept.
-                finish(nil, "Unexpected trade quantity; the giveaway trade was cancelled.")
-                if controller.tradeSerial == job.serial and UnitGUID("NPC") == partner.guid then CloseTrade() end
+                fail("Unexpected outgoing trade quantity.")
                 return
             end
             job.placed = expected
@@ -307,7 +342,7 @@ local function PlaceItems(plan, partner, quantity, done)
         job.stepping = true
         local ok = pcall(step)
         job.stepping = nil
-        if not ok then finish(nil, "Giveaway preparation failed. Check your cursor and trade before continuing.") end
+        if not ok then fail("Giveaway preparation failed. Check your cursor and trade before continuing.") end
     end
     job.step = pump
     job.ticker = C_Timer.NewTicker(0.05, pump)
@@ -404,7 +439,7 @@ end
 
 local events = CreateFrame("Frame")
 for _, event in ipairs({"PLAYER_LOGIN", "GROUP_ROSTER_UPDATE", "BAG_UPDATE_DELAYED", "TRADE_SHOW",
-    "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED", "TRADE_MONEY_CHANGED",
+    "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED", "TRADE_TARGET_ITEM_CHANGED", "TRADE_MONEY_CHANGED",
     "PLAYER_TRADE_MONEY", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE"}) do events:RegisterEvent(event) end
 events:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then controller:Initialize(); return end
@@ -414,12 +449,21 @@ events:SetScript("OnEvent", function(_, event, ...)
         CancelPlacement()
         controller.tradeSerial = (controller.tradeSerial or 0) + 1
         Autosplit.TradeBusy = true
-        local partner = {guid = UnitGUID("NPC"), name = GetUnitName("NPC", true) or "Unknown"}
+        local guid = ReadableGUID("NPC")
+        local name = ReadableText(GetUnitName("NPC", true))
+        if guid and controller:IsMember(guid) then
+            -- Prefer the roster spelling of the exact GUID, since the trade
+            -- unit can omit its name or realm during the opening event.
+            for _, member in ipairs(controller:Roster()) do
+                if member.guid == guid and member.name ~= "Unknown" then name = member.name; break end
+            end
+        end
+        local partner = {guid = guid, name = name}
         local ok, error = engine:Begin(partner)
         if not ok and error then controller:Notify(error) end
     elseif event == "TRADE_ACCEPT_UPDATE" then
         engine:AcceptUpdate(...)
-    elseif event == "TRADE_PLAYER_ITEM_CHANGED" or event == "TRADE_MONEY_CHANGED"
+    elseif event == "TRADE_PLAYER_ITEM_CHANGED" or event == "TRADE_TARGET_ITEM_CHANGED" or event == "TRADE_MONEY_CHANGED"
         or event == "PLAYER_TRADE_MONEY" then
         engine:OfferChanged()
         if placementJob then placementJob.step() end
@@ -427,7 +471,7 @@ events:SetScript("OnEvent", function(_, event, ...)
         local messageID, message = ...
         if (LE_GAME_ERR_TRADE_COMPLETE and messageID == LE_GAME_ERR_TRADE_COMPLETE)
             or (ERR_TRADE_COMPLETE and message == ERR_TRADE_COMPLETE) then
-            if event == "UI_INFO_MESSAGE" then engine:CompleteMessage() end
+            engine:CompleteMessage()
         elseif (LE_GAME_ERR_TRADE_CANCELLED and messageID == LE_GAME_ERR_TRADE_CANCELLED)
             or (ERR_TRADE_CANCELLED and message == ERR_TRADE_CANCELLED) then
             engine:Cancelled("WoW reported that the trade was cancelled.")

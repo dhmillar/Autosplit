@@ -74,19 +74,41 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         return true
     end
 
+    local function fullNameKey(name)
+        if type(name) ~= "string" then return nil end
+        local player, realm = name:match("^([^%-]+)%-(.+)$")
+        if not player or not realm then return nil end
+        return player:lower() .. "-" .. realm:lower():gsub("[%s%-]", "")
+    end
+
+    local function checkedSnapshot(item, snapshot)
+        if type(snapshot) ~= "table" or snapshot.itemID ~= item.itemID or not validQuantity(snapshot.quantity)
+            or type(snapshot.link) ~= "string" or snapshot.link == "" then return nil end
+        return {itemID = snapshot.itemID, link = snapshot.link, quantity = snapshot.quantity}
+    end
+
     function engine:Begin(partner)
         if self.active then return nil, "Waiting for the previous trade to settle." end
         if not db.enabled or not db.item then return nil end
         if self.invalidQuantity or not validQuantity(db.quantity) then return nil, "Enter a valid giveaway quantity first." end
         local quantity = db.quantity
         if api.combat() then return nil, "Giveaway paused during combat." end
-        if not partner or not partner.guid or not partner.name or partner.name == "Unknown"
+        if not partner or type(partner.guid) ~= "string" or partner.guid == "" or type(partner.name) ~= "string"
+            or partner.name == "Unknown" or not partner.name:find("%S")
             or not api.member(partner.guid) then return nil, "The raid trade recipient could not be verified." end
         partner = {guid = partner.guid, name = partner.name}
         local item = {itemID = db.item.itemID, link = db.item.link}
         local ledger, night = self:Ledger()
         if ledger[partner.guid] then
             return nil, partner.name .. " already received an item tonight (or has an unresolved trade)."
+        end
+        local identity = fullNameKey(partner.name)
+        if identity then
+            for _, candidate in pairs(ledger) do
+                if type(candidate)=="table" and fullNameKey(candidate.name)==identity then
+                    return nil, partner.name .. " is already in the giveaway ledger for tonight."
+                end
+            end
         end
         local source, error = api.find(item, quantity)
         if not source then return nil, error or "No unlocked, tradable copies remain in your bags." end
@@ -115,6 +137,8 @@ function Autosplit.CreateRaidEngine(api, db, notify)
             end
             active.phase = "offered"
             self:OfferChanged()
+            local snapshot = checkedSnapshot(item, api.snapshot(item))
+            if snapshot and snapshot.quantity == quantity then active.verifiedOffer = snapshot end
             notify(("%d offered to %s. Finish with WoW's Trade button."):format(quantity, partner.name))
         end
         local ok, placementError = api.place(source, partner, quantity, placed)
@@ -131,8 +155,9 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         if not active or active.phase == "closing" or active.session ~= api.session() then return end
         -- Capture while trade slots and the NPC unit still exist. Either side
         -- accepting supplies a snapshot; simultaneous 1,1 is not required.
-        if playerAccepted == 1 or targetAccepted == 1 then
-            local snapshot = api.snapshot(active.item)
+        if playerAccepted == 1 or targetAccepted == 1 or playerAccepted == true or targetAccepted == true then
+            local snapshot = checkedSnapshot(active.item, api.snapshot(active.item))
+            if not snapshot then active.offerContradiction = true end
             active.acceptedSnapshot = snapshot
             active.entry.acceptedSnapshot = snapshot
         end
@@ -141,7 +166,9 @@ function Autosplit.CreateRaidEngine(api, db, notify)
     function engine:OfferChanged()
         local active = self.active
         if not active or active.phase == "closing" or active.session ~= api.session() then return end
-        local snapshot = api.snapshot(active.item)
+        local snapshot = checkedSnapshot(active.item, api.snapshot(active.item))
+        if active.verifiedOffer and (not snapshot or snapshot.quantity ~= active.verifiedOffer.quantity
+            or snapshot.link ~= active.verifiedOffer.link) then active.offerContradiction = true end
         active.entry.observedQuantity = snapshot and snapshot.quantity or nil
         if snapshot then active.hadOffer = true end
         if not api.emptyOffer() then
@@ -155,17 +182,17 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         -- subsequent acceptance of an empty offer clears it in AcceptUpdate.
     end
 
-    function engine:CommitCompleted()
+    function engine:CommitCompleted(reconciledSnapshot)
         local active = self.active
         if not active or active.phase ~= "closing" or not active.completedMessage or active.cancelled
             or active.session ~= api.session() then return end
-        local snapshot = active.acceptedSnapshot
+        local snapshot = active.acceptedSnapshot or reconciledSnapshot
         if not snapshot or not validQuantity(snapshot.quantity) then return end
         api.cancelPlacement()
         local entry = active.entry
         entry.state, entry.timestamp = "served", api.timestamp()
         entry.quantity = snapshot.quantity
-        entry.completionEvidence = "UI_INFO_MESSAGE"
+        entry.completionEvidence = reconciledSnapshot and "server completion + verified offer and bag debit" or "server trade completion"
         entry.quantityMismatch = snapshot.quantity ~= active.quantity or nil
         entry.reason = nil
         self.active = nil
@@ -204,7 +231,13 @@ function Autosplit.CreateRaidEngine(api, db, notify)
     function engine:Poll()
         local active = self.active
         if not active or active.phase ~= "closing" or api.time() < active.deadline then return end
-        local delta = active.entry.before - api.count(active.item)
+        local total = api.count(active.item)
+        local delta = type(total) == "number" and active.entry.before - total or nil
+        if active.completedMessage and active.verifiedOffer and not active.offerContradiction
+            and delta == active.verifiedOffer.quantity and not api.cursor() then
+            self:CommitCompleted(active.verifiedOffer)
+            if not self.active then return end
+        end
         -- Acceptance plus a bag decrease cannot establish trade success. A
         -- server completion message is required, and is handled independently
         -- of bag timing or same-item incoming trades in CompleteMessage.

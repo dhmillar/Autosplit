@@ -1,4 +1,4 @@
-# Autosplit 1.2.1
+# Autosplit 1.2.2
 
 Hold **Ctrl** and **left-click or right-click** a stack in your bags. Autosplit opens a quantity window filled with the number of items currently in that stack. Change the number if desired, then click **Split** (or press Enter).
 
@@ -16,7 +16,7 @@ For a full split, the final item stays in the original slot. The default quantit
 
 Target: **WoW Retail 12.1.5**, interface **120105**. Supports Blizzard's combined and individual bags and Baganator's live inventory buttons. Classic and other inventory replacements are not qualified.
 
-Extract `dist/Autosplit-1.2.1.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
+Extract `dist/Autosplit-1.2.2.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
 
 ```text
 World of Warcraft/_retail_/Interface/AddOns/Autosplit/Autosplit.toc
@@ -38,7 +38,7 @@ The menu shows your backpack and equipped bags, including empty slots and stack 
 
 The **Quantity** field beside the selected item defaults to **1**. Change it to a positive whole number to give that many per eligible raid member. Valid edits are saved automatically and survive reloads; choosing a different item resets the quantity to 1. Invalid or blank input pauses automatic offers until corrected. Quantity cannot be changed during a trade.
 
-When a member of your **current raid** opens trade, Autosplit offers **exactly the configured quantity** of unlocked, unbound items. With Quantity 1 and a stack of 20, it splits one directly into the trade and leaves 19 in your bags. With Quantity 3, it offers three and leaves 17. A partial-stack giveaway now requires one free slot in a general bag. Autosplit first materializes the requested quantity there, waits for the original remainder and exact isolated count/GUID/unlocked state, and only then picks up that isolated stack for trade. It never trades the unverified split cursor or falls back to the original larger stack. An existing exact-size stack can still be offered with full bags. It prefers an exact-size stack, otherwise uses larger stacks, splitting only the amount needed. Quantities can span up to six trade slots; if more slots would be required, combine stacks in your bags first. Insufficient available stock or too many required trade slots is refused before any item is picked up.
+When a member of your **current raid** opens trade, Autosplit either prepares **exactly the number in the Quantity box** or stops. It never picks up an entire pre-existing multi-item source stack for a giveaway, even if its size matches the box. It leaves at least one item in every multi-item source. A verified singleton can be used directly. For example, with Quantity 3 and a stack of 20, it verifies the isolated three items in a free general bag slot and leaves 17. Staged amounts can span up to six trade slots; if too few items can safely be separated, nothing is offered. Check your cursor and bags if preparation stops.
 
 It never initiates trades, gives money, offers more than the requested quantity, or adds items to a trade that already contains outgoing items or gold. Other players do not need the addon. Every outgoing trade slot must acknowledge its exact count before the next source is touched. Missing acknowledgement times out without a retry; an incorrect outgoing quantity cancels that same trade. If preparation is interrupted, check the trade, cursor, and any isolated stack before continuing. Foreign cursors are never cleared automatically.
 
@@ -48,7 +48,7 @@ Each recipient's character GUID is tracked **once per local raid night**, shared
 
 The menu defaults to **Traded tonight**, a scrollable list showing each confirmed recipient's name, the quantity and item, and the local trade time, newest first. This list includes recipients who left the raid and survives reloads and item selection changes. Pending, uncertain, and cancelled trades are not displayed as completed gifts. It switches to the new night's list at the 6 a.m. rollover. Existing records from earlier versions display quantity 1. A server-confirmed trade with a captured accepted outgoing snapshot records the actual amount, including a visible requested/actual discrepancy. Its result does not depend on the net bag decrease, so receiving the same item does not hide it.
 
-The **Raid roster** tab shows **Ready**, **Given**, or **Pending** for current members. The **Unconfirmed** tab separately shows pending or uncertain attempts, including the captured recipient and requested amount, without claiming delivery. Completed history requires an accepted outgoing-item snapshot, server trade-complete information, and closure of the same trade session. Acceptance or a bag decrease alone never establishes success. A reported cancellation can release its reservation after settlement when no item was lost (up to five seconds); otherwise missing or conflicting evidence remains unconfirmed and blocks repeats that night. No old uncertain record is retroactively marked delivered. Bound items, including temporarily tradable bound raid loot, are excluded from this giveaway feature.
+The **Raid roster** tab shows **Ready**, **Given**, or **Pending** for current members. The **Unconfirmed** tab separately shows pending or uncertain attempts, including the captured recipient and requested amount, without claiming delivery. Completed history requires a server trade-complete message and closure of the same trade session. It uses the accepted outgoing-item snapshot when available; otherwise an unchanged verified offer and an exact bag decrease must both corroborate the server message. An uncertain attempt still blocks another giveaway that night. Acceptance or a bag decrease alone never establishes success. A reported cancellation can release its reservation after settlement when no item was lost (up to five seconds); otherwise missing or conflicting evidence remains unconfirmed and blocks repeats that night. No old uncertain record is retroactively marked delivered. Bound items, including temporarily tradable bound raid loot, are excluded from this giveaway feature.
 
 Trading and stack splitting share a cursor guard so they cannot run simultaneously. Automation is paused during combat. Closing the bag menu does not pause an enabled giveaway.
 
