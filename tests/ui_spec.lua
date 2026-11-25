@@ -250,20 +250,21 @@ function Frame:GetCenter() return 100, 100 end
 function Frame:GetEffectiveScale() return 1 end
 Minimap = MakeFrame("Minimap", UIParent)
 TradeFrame = MakeFrame("TradeFrame", UIParent); TradeFrame:Hide()
-local raid = true
+local raid, extraRaider = true, false
 local npcGUID, npcName = "Player-Raider", "Raider-Realm"
 local outgoing, gold = {}, 0
 local epoch = os.time({year = 2026, month = 10, day = 26, hour = 23, min = 0, sec = 0})
 date = function(format, timestamp) return os.date(format, timestamp) end
 time = function() return epoch end
 IsInRaid = function() return raid end
-GetNumGroupMembers = function() return 2 end
+GetNumGroupMembers = function() return extraRaider and 3 or 2 end
 UnitGUID = function(unit)
     if unit == "player" or unit == "raid1" then return "Player-Self" end
     if unit == "raid2" then return "Player-Raider" end
+    if unit == "raid3" and extraRaider then return "Player-New" end
     if unit == "NPC" then return npcGUID end
 end
-GetUnitName = function(unit) return unit == "NPC" and npcName or unit == "raid2" and "Raider-Realm" or "Self-Realm" end
+GetUnitName = function(unit) return unit == "NPC" and npcName or unit == "raid2" and "Raider-Realm" or unit == "raid3" and "New-Realm" or "Self-Realm" end
 UnitIsUnit = function(a, b) return UnitGUID(a) == UnitGUID(b) end
 C_Container.GetBagName = function(bag) return "Bag " .. bag end
 C_Item.GetItemIconByID = function() return 123 end
@@ -334,10 +335,12 @@ raidTest("/as opens the menu with inventory and selection slot", function()
     eq(AutosplitMainWindow.bagButtons[1].entry.bag, 0)
     eq(AutosplitMainWindow.quantity:GetText(), "1")
 end)
-raidTest("/as defaults to traded-tonight history with an explicit empty state", function()
-    eq(AutosplitMainWindow.listMode, "history")
-    eq(AutosplitMainWindow.rosterTitle:GetText(), "Traded tonight: 0")
-    eq(AutosplitMainWindow.historyEmpty:IsShown(), true)
+raidTest("/as defaults to remaining players with an explicit no-item state", function()
+    eq(AutosplitMainWindow.listMode, "remaining")
+    eq(AutosplitMainWindow.remainingTab:GetText(), "Remaining players")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 0")
+    eq(AutosplitMainWindow.remainingEmpty:GetText(), "Choose a giveaway item first.")
+    eq(AutosplitMainWindow.remainingEmpty:IsShown(), true)
 end)
 raidTest("minimap click toggles the same window", function()
     AutosplitMinimapButton:Fire("OnClick"); eq(AutosplitMainWindow:IsShown(), false)
@@ -348,6 +351,8 @@ raidTest("bag view selects an item without moving or consuming it", function()
     AutosplitMainWindow.bagButtons[1]:Fire("OnClick", "LeftButton")
     eq(addon.Giveaway.db.item.itemID, 42); eq(addon.Giveaway.db.enabled, true)
     eq(addon.Giveaway:Count({itemID = 42}), before)
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 1")
+    eq(AutosplitMainWindow.rosterLabels[1]:GetText(), "Raider-Realm")
 end)
 raidTest("dropping an item onto the selection slot returns it to the bags", function()
     local before = addon.Giveaway:Count({itemID = 42})
@@ -376,28 +381,30 @@ raidTest("trade completion records delivered and stops settlement timer", functi
     eq(addon.TradeBusy, false)
     eq(AutosplitMainWindow.toggle.enabled, true)
 end)
-raidTest("completed trade appears in the menu with recipient item and time", function()
-    local row = AutosplitMainWindow.historyRows[1]
-    assert(row.name:GetText():find("Raider%-Realm"))
-    assert(row.name:GetText():find(date("%H:%M", epoch), 1, true))
-    eq(row.item:GetText(), "1 x item:42")
-    eq(AutosplitMainWindow.rosterTitle:GetText(), "Traded tonight: 1")
-    eq(AutosplitMainWindow.historyEmpty:IsShown(), false)
+raidTest("confirmed recipient disappears from the remaining list but stays in the saved ledger", function()
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 0")
+    eq(AutosplitMainWindow.rosterLabels[1]:IsShown(), false)
+    eq(AutosplitMainWindow.remainingEmpty:GetText(), "No eligible players remaining.")
+    eq(addon.Giveaway.engine:History()[1].name, "Raider-Realm")
 end)
-raidTest("history remains visible when the recipient leaves the raid", function()
+raidTest("joining and leaving updates only eligible players in the current raid", function()
+    extraRaider = true; Event("GROUP_ROSTER_UPDATE")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 1")
+    eq(AutosplitMainWindow.rosterLabels[1]:GetText(), "New-Realm")
+    extraRaider = false; Event("GROUP_ROSTER_UPDATE")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 0")
+    eq(AutosplitMainWindow.rosterLabels[1]:IsShown(), false)
     raid = false; Event("GROUP_ROSTER_UPDATE")
-    eq(AutosplitMainWindow.rosterTitle:GetText(), "Traded tonight: 1")
-    assert(AutosplitMainWindow.historyRows[1].name:GetText():find("Raider%-Realm"))
-    raid = true
+    eq(AutosplitMainWindow.remainingEmpty:GetText(), "Join a raid to see remaining players.")
+    raid = true; Event("GROUP_ROSTER_UPDATE")
 end)
-raidTest("raid roster tab preserves ready and given status alongside history", function()
-    AutosplitMainWindow.rosterTab:Fire("OnClick")
-    eq(AutosplitMainWindow.listMode, "roster")
-    eq(AutosplitMainWindow.historyScroll:IsShown(), false)
-    assert(AutosplitMainWindow.rosterLabels[1]:GetText():find("Given"))
-    AutosplitMainWindow.historyTab:Fire("OnClick")
+raidTest("remaining and unconfirmed tabs are distinct", function()
+    AutosplitMainWindow.attemptsTab:Fire("OnClick")
     eq(AutosplitMainWindow.historyScroll:IsShown(), true)
     eq(AutosplitMainWindow.rosterScroll:IsShown(), false)
+    AutosplitMainWindow.remainingTab:Fire("OnClick")
+    eq(AutosplitMainWindow.historyScroll:IsShown(), false)
+    eq(AutosplitMainWindow.rosterScroll:IsShown(), true)
 end)
 raidTest("repeat trade from the same raid member adds nothing", function()
     OpenTrade(); eq(outgoing[1], nil); CloseTrade(); Drain()
@@ -417,12 +424,11 @@ raidTest("night lasts across midnight and rolls over at six local", function()
     epoch = os.time({year = 2026, month = 10, day = 27, hour = 6, min = 0, sec = 0})
     eq(addon.Giveaway:Night(), "2026-10-27")
 end)
-raidTest("new raid night hides previous rows and displays the empty history state", function()
+raidTest("a new raid night makes a previously served raider eligible again", function()
+    addon.Giveaway:Select({itemID=42, link="item:42"})
     addon.RefreshWindow()
-    eq(AutosplitMainWindow.historyRows[1].name:IsShown(), false)
-    eq(AutosplitMainWindow.historyRows[1].item:IsShown(), false)
-    eq(AutosplitMainWindow.historyEmpty:IsShown(), true)
-    eq(AutosplitMainWindow.rosterTitle:GetText(), "Traded tonight: 0")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 1")
+    eq(AutosplitMainWindow.rosterLabels[1]:GetText(), "Raider-Realm")
 end)
 raidTest("a partial stack is verified in the free general bag slot before trade", function()
     inventory = {[0] = {[1] = item(20)}, [1] = {}, [5] = {}}
@@ -499,7 +505,7 @@ raidTest("quantity spanning stacks offers the exact total and records that quant
     end
     CloseTrade(true); Drain()
     eq(addon.Giveaway.engine:History()[1].quantity, 5)
-    eq(AutosplitMainWindow.historyRows[1].item:GetText(), "5 x item:42")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 0")
     eq(fullAcceptCalls, 0)
 end)
 raidTest("insufficient stock makes no partial outgoing offer", function()
@@ -568,13 +574,15 @@ raidTest("unconfirmed tab shows a reserved recipient without claiming delivery",
     eq(#addon.Giveaway.engine:History(), 0)
     ledger["Player-Unconfirmed"] = nil
 end)
-raidTest("completed quantity discrepancy is labelled before the item link", function()
+raidTest("unconfirmed aliases are kept out of remaining players until verified", function()
+    addon.Giveaway:Select({itemID=42, link="item:42"})
     local ledger = addon.Giveaway.engine:Ledger()
-    ledger["Player-Discrepancy"] = {state="served", name="Actual-Realm", itemID=42,
-        link="item:42", quantity=20, requestedQuantity=1, quantityMismatch=true, timestamp=epoch}
-    AutosplitMainWindow.historyTab:Fire("OnClick")
-    eq(AutosplitMainWindow.historyRows[1].item:GetText(), "20 x (requested 1) item:42")
-    ledger["Player-Discrepancy"] = nil
+    ledger["Player-Alias"] = {state="uncertain", name="Raider-Realm", itemID=42,
+        link="item:42", quantity=1, requestedQuantity=1, timestamp=epoch}
+    AutosplitMainWindow.remainingTab:Fire("OnClick")
+    eq(AutosplitMainWindow.rosterTitle:GetText(), "Remaining players: 0")
+    eq(AutosplitMainWindow.remainingEmpty:GetText(), "No eligible players. Check Unconfirmed.")
+    ledger["Player-Alias"] = nil
 end)
 raidTest("hidden giveaway window and idle bags do not scan inventory", function()
     AutosplitMainWindow:Hide()

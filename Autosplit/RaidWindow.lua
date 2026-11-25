@@ -99,33 +99,40 @@ local function RefreshInventory()
     window.bagContent:SetHeight(math.max(440, -y + 48))
 end
 
-local function RefreshRoster()
-    local roster = giveaway:Roster()
-    local delivered = 0
-    for index, member in ipairs(roster) do
-        local label = window.rosterLabels[index]
-        if not label then
-            label = Text(window.rosterContent, "GameFontHighlightSmall", 0, -(index - 1) * 20, 298)
-            window.rosterLabels[index] = label
+local function RefreshRemaining()
+    local count, unresolved = 0, 0
+    local inRaid, hasItem = IsInRaid(), giveaway.db.item ~= nil
+    if inRaid and hasItem then
+        for _, member in ipairs(giveaway:Roster()) do
+            local record = giveaway.engine:Recipient(member.guid, member.name)
+            if not record and member.name ~= "Unknown" and member.name:find("%S") then
+                count = count + 1
+                local label = window.rosterLabels[count]
+                if not label then
+                    label = Text(window.rosterContent, "GameFontHighlightSmall", 0, -(count - 1) * 20, 290)
+                    window.rosterLabels[count] = label
+                    label:SetHeight(18)
+                    label:SetWordWrap(false)
+                end
+                label:SetText(member.name)
+                label:Show()
+            elseif record and record.state ~= "served" then
+                unresolved = unresolved + 1
+            end
         end
-        local record = giveaway.engine:Recipient(member.guid)
-        local prefix = "|cff9aa6b3Ready|r"
-        if record then
-            if record.state == "served" then prefix = "|cff6fdf96Given|r"; delivered = delivered + 1
-            else prefix = "|cffffcc66Pending|r" end
-        end
-        label:SetText(prefix .. "  " .. member.name)
-        label:Show()
     end
-    for index = #roster + 1, #window.rosterLabels do window.rosterLabels[index]:Hide() end
-    window.rosterContent:SetHeight(math.max(130, #roster * 20))
-    window.rosterTitle:SetText(IsInRaid() and ("Raid: %d / %d given tonight"):format(delivered, #roster)
-        or "Join a raid to give items")
+    for index = count + 1, #window.rosterLabels do window.rosterLabels[index]:Hide() end
+    window.rosterContent:SetHeight(math.max(108, count * 20))
+    window.rosterTitle:SetText(("Remaining players: %d"):format(count))
+    window.remainingEmpty:SetText(not inRaid and "Join a raid to see remaining players."
+        or not hasItem and "Choose a giveaway item first."
+        or unresolved > 0 and "No eligible players. Check Unconfirmed."
+        or "No eligible players remaining.")
+    window.remainingEmpty:SetShown(count == 0)
 end
 
-local function RefreshHistory()
-    local unconfirmed = window.listMode == "unconfirmed"
-    local history = unconfirmed and giveaway.engine:Attempts() or giveaway.engine:History()
+local function RefreshAttempts()
+    local history = giveaway.engine:Attempts()
     for index, record in ipairs(history) do
         local row = window.historyRows[index]
         if not row then
@@ -141,9 +148,7 @@ local function RefreshHistory()
         end
         local clock = record.timestamp and date("%H:%M", record.timestamp) or "--:--"
         row.name:SetText(clock .. "  " .. record.name)
-        local amount = tostring(record.quantity or 1) .. " x "
-        if unconfirmed then amount = "Unconfirmed; requested " .. (record.requestedQuantity or record.quantity or 1) .. " x "
-        elseif record.quantityMismatch then amount = amount .. "(requested " .. record.requestedQuantity .. ") " end
+        local amount = "Unconfirmed; requested " .. (record.requestedQuantity or record.quantity or 1) .. " x "
         row.item:SetText(amount .. (record.link or ("Item " .. record.itemID)))
         row.name:Show()
         row.item:Show()
@@ -152,20 +157,18 @@ local function RefreshHistory()
         window.historyRows[index].name:Hide()
         window.historyRows[index].item:Hide()
     end
-    window.historyEmpty:SetText(unconfirmed and "No unconfirmed trades tonight." or "No completed trades tonight.")
     window.historyEmpty:SetShown(#history == 0)
     window.historyContent:SetHeight(math.max(108, #history * 40))
-    window.rosterTitle:SetText((unconfirmed and "Unconfirmed attempts: %d" or "Traded tonight: %d"):format(#history))
+    window.rosterTitle:SetText(("Unconfirmed attempts: %d"):format(#history))
 end
 
 local function RefreshLists()
-    local history = window.listMode ~= "roster"
-    window.historyScroll:SetShown(history)
-    window.rosterScroll:SetShown(not history)
-    window.historyTab:SetEnabled(window.listMode ~= "history")
-    window.rosterTab:SetEnabled(window.listMode ~= "roster")
-    window.attemptsTab:SetEnabled(window.listMode ~= "unconfirmed")
-    if history then RefreshHistory() else RefreshRoster() end
+    local attempts = window.listMode == "unconfirmed"
+    window.historyScroll:SetShown(attempts)
+    window.rosterScroll:SetShown(not attempts)
+    window.remainingTab:SetEnabled(attempts)
+    window.attemptsTab:SetEnabled(not attempts)
+    if attempts then RefreshAttempts() else RefreshRemaining() end
 end
 
 local function SelectList(mode)
@@ -270,9 +273,8 @@ local function CreateWindow()
         "When a raid member opens trade, the selected quantity is added automatically. Finish with WoW's Trade button.\n\nEach person gets one giveaway tonight, even after a reload or item change.")
     details:SetHeight(92)
     details:SetJustifyV("TOP")
-    window.listMode = "history"
-    window.historyTab = Button(window, "Traded tonight", 520, -332, 100, function() SelectList("history") end)
-    window.rosterTab = Button(window, "Raid roster", 625, -332, 100, function() SelectList("roster") end)
+    window.listMode = "remaining"
+    window.remainingTab = Button(window, "Remaining players", 520, -332, 150, function() SelectList("remaining") end)
     window.attemptsTab = Button(window, "Unconfirmed", 730, -332, 100, function() SelectList("unconfirmed") end)
     window.rosterTitle = Text(window, "GameFontNormal", 520, -371, 310)
     local rosterScroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
@@ -282,6 +284,7 @@ local function CreateWindow()
     window.rosterContent = CreateFrame("Frame", nil, rosterScroll)
     window.rosterContent:SetSize(290, 108)
     rosterScroll:SetScrollChild(window.rosterContent)
+    window.remainingEmpty = Text(window.rosterContent, "GameFontDisableSmall", 0, -4, 290)
     window.historyScroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
     window.historyScroll:SetPoint("TOPLEFT", 520, -395)
     window.historyScroll:SetSize(292, 108)
@@ -289,7 +292,7 @@ local function CreateWindow()
     window.historyContent:SetSize(290, 108)
     window.historyScroll:SetScrollChild(window.historyContent)
     window.historyRows = {}
-    window.historyEmpty = Text(window.historyContent, "GameFontDisableSmall", 0, -4, 290, "No completed trades tonight.")
+    window.historyEmpty = Text(window.historyContent, "GameFontDisableSmall", 0, -4, 290, "No unconfirmed trades tonight.")
     window.status = Text(window, "GameFontHighlightSmall", 520, -520, 310)
     window.status:SetHeight(64)
     window.status:SetJustifyV("TOP")

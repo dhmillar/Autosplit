@@ -1,4 +1,4 @@
-# Autosplit 1.2.2
+# Autosplit 1.2.3
 
 Hold **Ctrl** and **left-click or right-click** a stack in your bags. Autosplit opens a quantity window filled with the number of items currently in that stack. Change the number if desired, then click **Split** (or press Enter).
 
@@ -16,7 +16,7 @@ For a full split, the final item stays in the original slot. The default quantit
 
 Target: **WoW Retail 12.1.5**, interface **120105**. Supports Blizzard's combined and individual bags and Baganator's live inventory buttons. Classic and other inventory replacements are not qualified.
 
-Extract `dist/Autosplit-1.2.2.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
+Extract `dist/Autosplit-1.2.3.zip` into your WoW Retail `Interface/AddOns` folder. The result must be:
 
 ```text
 World of Warcraft/_retail_/Interface/AddOns/Autosplit/Autosplit.toc
@@ -46,9 +46,9 @@ It never initiates trades, gives money, offers more than the requested quantity,
 
 Each recipient's character GUID is tracked **once per local raid night**, shared across all giveaway item selections, quantities, and raid roster changes for your distributing character. A night resets at **6 a.m. local computer time**, so crossing midnight does not permit repeats. Joining another raid the same night also preserves the no-repeat record. The selected item, quantity, enabled state, minimap position, and recipient ledger are retained through normal reloads and relogs through `AutosplitCharDB` (per character), at WoW's normal save boundaries. This is not crash-proof disk persistence. Seven recent nights are retained.
 
-The menu defaults to **Traded tonight**, a scrollable list showing each confirmed recipient's name, the quantity and item, and the local trade time, newest first. This list includes recipients who left the raid and survives reloads and item selection changes. Pending, uncertain, and cancelled trades are not displayed as completed gifts. It switches to the new night's list at the 6 a.m. rollover. Existing records from earlier versions display quantity 1. A server-confirmed trade with a captured accepted outgoing snapshot records the actual amount, including a visible requested/actual discrepancy. Its result does not depend on the net bag decrease, so receiving the same item does not hide it.
+The menu defaults to **Remaining players**, a live list of eligible members in your current raid who have not received a giveaway tonight. Players disappear after confirmed delivery or when they leave the raid. The saved ledger still prevents a repeat giveaway, even after a reload or an item change. Pending or uncertain trades are kept out of the remaining list; see **Unconfirmed**.
 
-The **Raid roster** tab shows **Ready**, **Given**, or **Pending** for current members. The **Unconfirmed** tab separately shows pending or uncertain attempts, including the captured recipient and requested amount, without claiming delivery. Completed history requires a server trade-complete message and closure of the same trade session. It uses the accepted outgoing-item snapshot when available; otherwise an unchanged verified offer and an exact bag decrease must both corroborate the server message. An uncertain attempt still blocks another giveaway that night. Acceptance or a bag decrease alone never establishes success. A reported cancellation can release its reservation after settlement when no item was lost (up to five seconds); otherwise missing or conflicting evidence remains unconfirmed and blocks repeats that night. No old uncertain record is retroactively marked delivered. Bound items, including temporarily tradable bound raid loot, are excluded from this giveaway feature.
+The **Unconfirmed** tab separately shows pending or uncertain attempts, including the captured recipient and requested amount, without claiming delivery. Completed history requires a server trade-complete message and closure of the same trade session. It uses the accepted outgoing-item snapshot when available; otherwise an unchanged verified offer and an exact bag decrease must both corroborate the server message. An uncertain attempt still blocks another giveaway that night. Acceptance or a bag decrease alone never establishes success. A reported cancellation can release its reservation after settlement when no item was lost (up to five seconds); otherwise missing or conflicting evidence remains unconfirmed and blocks repeats that night. No old uncertain record is retroactively marked delivered. Bound items, including temporarily tradable bound raid loot, are excluded from this giveaway feature.
 
 Trading and stack splitting share a cursor guard so they cannot run simultaneously. Automation is paused during combat. Closing the bag menu does not pause an enabled giveaway.
 

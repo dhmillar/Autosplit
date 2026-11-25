@@ -31,9 +31,22 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         return db.nights[night], night
     end
 
-    function engine:Recipient(guid)
+    local function fullNameKey(name)
+        if type(name) ~= "string" then return nil end
+        local player, realm = name:match("^([^%-]+)%-(.+)$")
+        if not player or not realm then return nil end
+        return player:lower() .. "-" .. realm:lower():gsub("[%s%-]", "")
+    end
+
+    function engine:Recipient(guid, name)
         local ledger = self:Ledger()
-        return ledger[guid]
+        if ledger[guid] then return ledger[guid] end
+        local key = fullNameKey(name)
+        if key then
+            for _, record in pairs(ledger) do
+                if type(record) == "table" and fullNameKey(record.name) == key then return record end
+            end
+        end
     end
 
     function engine:History(unconfirmed)
@@ -74,13 +87,6 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         return true
     end
 
-    local function fullNameKey(name)
-        if type(name) ~= "string" then return nil end
-        local player, realm = name:match("^([^%-]+)%-(.+)$")
-        if not player or not realm then return nil end
-        return player:lower() .. "-" .. realm:lower():gsub("[%s%-]", "")
-    end
-
     local function checkedSnapshot(item, snapshot)
         if type(snapshot) ~= "table" or snapshot.itemID ~= item.itemID or not validQuantity(snapshot.quantity)
             or type(snapshot.link) ~= "string" or snapshot.link == "" then return nil end
@@ -99,16 +105,8 @@ function Autosplit.CreateRaidEngine(api, db, notify)
         partner = {guid = partner.guid, name = partner.name}
         local item = {itemID = db.item.itemID, link = db.item.link}
         local ledger, night = self:Ledger()
-        if ledger[partner.guid] then
+        if self:Recipient(partner.guid, partner.name) then
             return nil, partner.name .. " already received an item tonight (or has an unresolved trade)."
-        end
-        local identity = fullNameKey(partner.name)
-        if identity then
-            for _, candidate in pairs(ledger) do
-                if type(candidate)=="table" and fullNameKey(candidate.name)==identity then
-                    return nil, partner.name .. " is already in the giveaway ledger for tonight."
-                end
-            end
         end
         local source, error = api.find(item, quantity)
         if not source then return nil, error or "No unlocked, tradable copies remain in your bags." end
